@@ -1,14 +1,20 @@
-import { CreateGPGPU, GPGPU, DrawParam }  from "./lib/gpgpu.js";
+import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Package }  from "./lib/gpgpu.js";
 import { CanvasDrawable } from "./draw.js";
 
 const stations : Station[] = [];
 let cnvMap : HTMLCanvasElement;
+let cnvSize : Vec2;
 let ctx : CanvasRenderingContext2D;
 let mygpgpu : GPGPU = undefined;
 let ui : UI;
+let canvasDrawable: CanvasDrawable;
 
 function msg(text: string){
     console.log(text);
+}
+
+function getScale(): Vec2 {
+    return cnvSize.div(ui.viewSize);
 }
 
 class Vec2 {
@@ -18,6 +24,52 @@ class Vec2 {
     constructor(x: number, y: number){
         this.x = x;
         this.y = y;
+    }
+
+    add(n: number | Vec2) : Vec2 {
+        if(n instanceof Vec2){
+
+            return new Vec2(this.x + n.x, this.y + n.y);
+        }
+        else{
+
+            return new Vec2(this.x + n, this.y + n);
+        }
+    }
+
+    sub(n: number | Vec2) : Vec2 {
+        if(n instanceof Vec2){
+
+            return new Vec2(this.x - n.x, this.y - n.y);
+        }
+        else{
+
+            return new Vec2(this.x - n, this.y - n);
+        }
+    }
+
+    mul(n: number | Vec2) : Vec2 {
+        if(n instanceof Vec2){
+
+            return new Vec2(this.x * n.x, this.y * n.y);
+        }
+        else{
+
+            return new Vec2(this.x * n, this.y * n);
+        }
+    }
+
+    div(n: number | Vec2) : Vec2 {
+        if(n instanceof Vec2){
+
+            console.assert(n.x != 0 && n.y != 0);
+            return new Vec2(this.x / n.x, this.y / n.y);
+        }
+        else{
+
+            console.assert(n != 0);
+            return new Vec2(this.x / n, this.y / n);
+        }
     }
 }
 
@@ -118,14 +170,14 @@ function getStations(objs:[]){
 
     const maxX = stations.map(a => a.pos.x).reduce((a, b) => Math.max(a, b));
     const maxY = stations.map(a => a.pos.y).reduce((a, b) => Math.max(a, b));
-    const span = new Vec2(maxX - minX, maxY - minY);
-    const scale = new Vec2(cnvMap.width / span.x, cnvMap.height / span.y);
 
-    msg(`(${minX} ${minY}) -  (${maxX} ${maxY}) , span:(${span.x} ${span.y}), scale:(${scale.x} ${scale.y})`)
+    ui.mapPos = new Vec2(minX, minY);
+    ui.viewSize = new Vec2(maxX - minX, maxY - minY);
 
-    for(let sta of stations){
-        ctx.strokeText(sta.title.ja, (sta.pos.x - minX) * scale.x, (sta.pos.y - minY) * scale.y);
-    }
+    ui.viewPos = new Vec2(minX, minY);
+    ui.viewSize = new Vec2(maxX - minX, maxY - minY);
+
+    drawStations();
 
     if(mygpgpu == undefined){
 
@@ -136,72 +188,116 @@ function getStations(objs:[]){
     }
 }
 
-class UI {
-    lastMouseX: number = null;
-    lastMouseY: number = null;
+function drawStations(){
+    const scale = cnvSize.div(ui.viewSize);
 
-    mousemove(ev: MouseEvent, drawParam: DrawParam){
+    msg(`pos:(${ui.viewPos.x} ${ui.viewPos.y}) size:(${ui.viewSize.x} ${ui.viewSize.y}) scale:(${scale.x} ${scale.y})`)
+
+    ctx.clearRect(0, 0, cnvMap.width, cnvMap.height);
+    for(let sta of stations){
+        const x = (sta.pos.x - ui.viewPos.x) * scale.x;
+        const y = (sta.pos.y - ui.viewPos.y) * scale.y;
+        if(0 <= x && x < cnvSize.x && 0 <= y && y < cnvSize.y){
+
+            ctx.strokeText(sta.title.ja, x, y);
+        }
+    }
+
+    if(mygpgpu != undefined){
+
+        const param = canvasDrawable.getParam();
+        const pkg = mygpgpu.packages[param.id] as Package;
+        const texInf = Array.from(pkg.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
+        console.assert(texInf != undefined);
+        texInf.dirty = true
+    }
+}
+
+
+class UI extends UI3D {
+    mapPos: Vec2;
+    mapSize: Vec2;
+
+    viewPos: Vec2;
+    viewSize: Vec2;
+
+    downPos: Vec2;
+    lastPos: Vec2;
+    captured: boolean = false;
+
+    pointerdown = (ev: PointerEvent, drawParam: DrawParam)=>{
+        msg(`pointerdown`);
+        this.captured = true;
+        mygpgpu.canvas.setPointerCapture(ev.pointerId);
+
+        this.downPos = new Vec2(ev.clientX, ev.clientY);
+        this.lastPos = new Vec2(ev.clientX, ev.clientY);
+    }
+
+    pointerup = (ev: PointerEvent, drawParam: DrawParam)=>{
+        msg(`pointerup`);
+        this.captured = false;
+        mygpgpu.canvas.releasePointerCapture(ev.pointerId);
+    }
+
+    pointermove = (ev: PointerEvent, drawParam: DrawParam)=>{
+        if(! this.captured){
+            return;
+        }
         msg(`move`);
-        var newX = ev.clientX;
-        var newY = ev.clientY;
+        let newPos = new Vec2(ev.clientX, ev.clientY);
 
-        if (ev.buttons != 0 && this.lastMouseX != null) {
+        if (ev.buttons != 0 && this.lastPos != undefined) {
 
+            const diff = newPos.sub(this.lastPos).div(300);
             if(ev.shiftKey){
 
-                drawParam.x += (newX - this.lastMouseX) / 300;
-                drawParam.y -= (newY - this.lastMouseY) / 300;
+                const diff = newPos.sub(this.lastPos).div(300);
+                drawParam.x += diff.x;
+                drawParam.y -= diff.y;
+            }
+            else if(ev.ctrlKey){
+
+                drawParam.xRot += diff.y;
+                drawParam.yRot += diff.x;
             }
             else{
 
-                drawParam.xRot += (newY - this.lastMouseY) / 300;
-                drawParam.yRot += (newX - this.lastMouseX) / 300;
+                const diff = newPos.sub(this.lastPos);
+                const scaledDiff = diff.div(getScale());
+                ui.viewPos = ui.viewPos.sub(scaledDiff);
+                drawStations();
             }
         }
 
-        this.lastMouseX = newX
-        this.lastMouseY = newY;
+        this.lastPos = newPos;
     }
 
-    touchmove(ev: TouchEvent, drawParam: DrawParam){
-        msg(`touch`);
-        // タッチによる画面スクロールを止める
-        ev.preventDefault(); 
-
-        var newX = ev.changedTouches[0].clientX;
-        var newY = ev.changedTouches[0].clientY;
-
-        if (this.lastMouseX != null) {
-
-            drawParam.xRot += (newY - this.lastMouseY) / 300;
-            drawParam.yRot += (newX - this.lastMouseX) / 300;
-        }
-
-        this.lastMouseX = newX
-        this.lastMouseY = newY;
-    }
-
-
-    wheel(ev: WheelEvent, drawParam: DrawParam){
-        msg(`wheel`);
-        drawParam.z += 0.002 * ev.deltaY;
+    wheel = (ev: WheelEvent, drawParam: DrawParam)=>{
+        msg(`wheel:${ev.deltaY}`);
 
         // ホイール操作によるスクロールを無効化する
         ev.preventDefault();
+
+        if(ev.ctrlKey){
+
+            drawParam.z += 0.002 * ev.deltaY;
+        }
+        else{
+            const center = ui.viewPos.add(ui.viewSize.mul(0.5));
+            ui.viewSize = ui.viewSize.mul(1 + 0.002 * ev.deltaY);
+            ui.viewPos = center.sub(ui.viewSize.mul(0.5));
+            drawStations();
+        }
     }
 }
 
 function testCanvasDrawable(){
-    const canvasDrawable = new CanvasDrawable(cnvMap);
+    canvasDrawable = new CanvasDrawable(cnvMap);
 
     var webGlCanvas = document.getElementById("webgl-canvas") as HTMLCanvasElement;
 
-    ui = new UI();
-    mygpgpu = CreateGPGPU(webGlCanvas);
-
-    mygpgpu.mousemove = ui.mousemove;
-    mygpgpu.touchmove = ui.touchmove;
-    mygpgpu.wheel     = ui.wheel;
+    mygpgpu = CreateGPGPU(webGlCanvas, ui);
 
     mygpgpu.startDraw3D([ 
         canvasDrawable,
@@ -210,6 +306,8 @@ function testCanvasDrawable(){
 
 
 export function initJikuRyoko(){
+    ui = new UI();
+
     // fetchJson("json/Stations.json", (data:any[])=>{
     //     msg(`駅 done:${data.length}`)
     // });
@@ -217,6 +315,7 @@ export function initJikuRyoko(){
 
 
     cnvMap = document.getElementById("canvas-map") as HTMLCanvasElement;
+    cnvSize = new Vec2(cnvMap.width, cnvMap.height);
     ctx = cnvMap.getContext('2d');
     
     // getData("odpt:Station?odpt:operator=odpt.Operator:Keio&", getStations);
