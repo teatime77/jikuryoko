@@ -293,6 +293,10 @@ function drawStations(setDirty: boolean = true){
     }
     msg(`timePoints:${timePoints.length}`);
 
+    if(timeDrawable != undefined){
+        timeDrawable.update(timePoints, Color.red, 5);
+    }
+
     if(setDirty){
 
         const param = canvasDrawable.getParam();
