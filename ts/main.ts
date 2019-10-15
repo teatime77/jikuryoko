@@ -1,9 +1,10 @@
-import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Package }  from "./lib/gpgpu.js";
-import { CanvasDrawable } from "./draw.js";
+import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Package, Vertex, Points, Color }  from "./lib/gpgpu.js";
+import { CanvasDrawable, mapBox } from "./draw.js";
 
 let operators : Operator[];
 let railways  : Railway[];
-let stations  : Station[];
+let stations  : Map<string, Station>;
+let timetableReady: boolean = false;
 
 let cnvMap : HTMLCanvasElement;
 let cnvSize : Vec2;
@@ -11,6 +12,8 @@ let ctx : CanvasRenderingContext2D;
 let mygpgpu : GPGPU = undefined;
 let ui : UI;
 let canvasDrawable: CanvasDrawable;
+let timeDrawable : Points;
+let timePoints: Vertex[];
 
 function msg(text: string){
     console.log(text);
@@ -123,12 +126,13 @@ class Railway {
 class Station {
     pos: Vec2;
     title: Title;
+    timetables : Timetable[] = [];
 
     // owl:sameAs: "odpt.Station:Tobu.Daishi.Nishiarai"
     sameAs: string;
 
     constructor(obj:any){
-        this.pos = new Vec2(obj["geo:lat"], obj["geo:long"]);
+        this.pos = new Vec2(obj["geo:long"], obj["geo:lat"]);
 
         const title = obj["odpt:stationTitle"] as Title;
         this.title = new Title(title.en, title.ja);
@@ -150,6 +154,27 @@ class Station {
         SVGTextElement
     }
 }
+
+class TrainTimetable{
+    timetables : Timetable[] = [];
+}
+
+class Timetable{
+    station: Station;
+    arrivalTime: number;
+    time: number;
+
+    constructor(station: Station, arrivalTime: number, departureTime: number){
+        this.station = station;
+        this.arrivalTime = arrivalTime;
+        this.time = departureTime;
+        if(departureTime == undefined){
+            this.time = arrivalTime;
+        }
+    }
+}
+
+
 
 function fetchJson(path:string, fnc:(json: any[])=>void){
     let k = window.location.href.indexOf("/index.html");
@@ -205,57 +230,70 @@ function isNull(obj:any): boolean {
 }
 
 function getStations(objs:[]){
-    stations = [];
+    stations = new Map<string, Station>();
     for(let obj of objs){
 
-        if(isNull(obj["geo:lat"]) || isNull(obj["geo:long"])){
+        if(isNull(obj["geo:long"]) || isNull(obj["geo:lat"])){
             msg(`位置不明:${obj["odpt:stationTitle"]["ja"]}`);            
         }
         else{
 
-            stations.push( new Station(obj as Station) );
+            let station = new Station(obj as Station);
+            stations.set(station.sameAs, station);
         }
     }
 
-    const minX = stations.map(a => a.pos.x).reduce((a, b) => Math.min(a, b));
-    const minY = stations.map(a => a.pos.y).reduce((a, b) => Math.min(a, b));
+    const minX = Array.from(stations.values()).map(a => a.pos.x).reduce((a, b) => Math.min(a, b));
+    const minY = Array.from(stations.values()).map(a => a.pos.y).reduce((a, b) => Math.min(a, b));
 
-    const maxX = stations.map(a => a.pos.x).reduce((a, b) => Math.max(a, b));
-    const maxY = stations.map(a => a.pos.y).reduce((a, b) => Math.max(a, b));
+    const maxX = Array.from(stations.values()).map(a => a.pos.x).reduce((a, b) => Math.max(a, b));
+    const maxY = Array.from(stations.values()).map(a => a.pos.y).reduce((a, b) => Math.max(a, b));
 
     ui.mapPos = new Vec2(minX, minY);
     ui.viewSize = new Vec2(maxX - minX, maxY - minY);
 
     ui.viewPos = new Vec2(minX, minY);
     ui.viewSize = new Vec2(maxX - minX, maxY - minY);
-
-    drawStations();
-
-    if(mygpgpu == undefined){
-
-        setTimeout(function(){
-            testCanvasDrawable();
-
-        }, 100);
-    }
 }
 
-function drawStations(){
+function drawStations(setDirty: boolean = true){
+    const viewBottom = ui.viewPos.y + ui.viewSize.y;
     const scale = cnvSize.div(ui.viewSize);
+
+    const scaleW = mapBox.width  / ui.viewSize.x;
+    const scaleH = mapBox.height / ui.viewSize.y;
+    const scaleD = 1 / (24 * 60);
 
     msg(`pos:(${ui.viewPos.x} ${ui.viewPos.y}) size:(${ui.viewSize.x} ${ui.viewSize.y}) scale:(${scale.x} ${scale.y})`)
 
+    timePoints = [];
     ctx.clearRect(0, 0, cnvMap.width, cnvMap.height);
-    for(let sta of stations){
-        const x = (sta.pos.x - ui.viewPos.x) * scale.x;
-        const y = (sta.pos.y - ui.viewPos.y) * scale.y;
+
+    for(let sta of stations.values()){
+        let x = (sta.pos.x - ui.viewPos.x) * scale.x;
+        let y = (viewBottom - sta.pos.y) * scale.y;
         if(0 <= x && x < cnvSize.x && 0 <= y && y < cnvSize.y){
 
             ctx.strokeText(sta.title.ja, x, y);
+
+            msg(`${sta.title.ja} ${sta.timetables.length}`)
+            for(let timetable of sta.timetables){
+                // if(0.1 < Math.random()){
+                //     continue;
+                // }
+
+                let x2 = mapBox.x1 + (sta.pos.x - ui.viewPos.x) * scaleW;
+                let y2 = mapBox.y1 + (sta.pos.y - ui.viewPos.y) * scaleH;
+                let z2 = mapBox.z1 +  timetable.time * scaleD;
+                timePoints.push(new Vertex(x2, y2, z2));
+
+                // msg(`${sta.pos.x},${sta.pos.y} => ${x2} ${y2}`)
+            }
         }
     }
+    msg(`timePoints:${timePoints.length}`);
 
-    if(mygpgpu != undefined){
+    if(setDirty){
 
         const param = canvasDrawable.getParam();
         const pkg = mygpgpu.packages[param.id] as Package;
@@ -263,6 +301,86 @@ function drawStations(){
         console.assert(texInf != undefined);
         texInf.dirty = true
     }
+}
+
+function getStation(text:string){
+    if(text != undefined){
+        console.assert(text.startsWith("odpt.Station:"));
+        text = text.substring("odpt.Station:".length);
+
+        if(stations.has(text)){
+        }
+        else{
+
+            msg(`不明駅 ${text}`)
+        }
+    }
+
+}
+
+function trimStation(text: string): string {
+    console.assert(text.startsWith("odpt.Station:"));
+    return text.substring("odpt.Station:".length);
+}
+
+function getTime(prevTime: number, timeText: string) : number {
+    if(timeText == undefined){
+        return undefined;
+    }
+
+    let v = timeText.split(":");
+    console.assert(v.length == 2);
+    const hh = parseInt(v[0]);
+    const mm = parseInt(v[0]);
+
+    let hhmm = hh*60 + mm;
+    if(hhmm < prevTime){
+        hhmm = (24 + hh) * 60 + mm;
+    }
+
+    return hhmm;
+}
+
+function getTrainTimetables(objs:any[]){
+    timetableReady = true;
+    let cnt: number = 0;
+
+    for(let obj of objs){
+        if(obj["odpt:calendar"] != "odpt.Calendar:Weekday"){
+            continue;
+        }
+        let trainTimetable = new TrainTimetable();
+        let prevTime: number = 0;
+        for(let data of obj["odpt:trainTimetableObject"]){
+            console.assert(prevTime != undefined);
+
+            let arrivalStation = data["odpt:arrivalStation"] as string;
+            let departureStation = data["odpt:departureStation"] as string;
+            
+            let station: Station;
+            if(arrivalStation != undefined){
+                station = stations.get(trimStation(arrivalStation));
+            }
+            else{
+
+                station = stations.get(trimStation(departureStation));
+            }
+            console.assert(station != undefined);
+
+            let arrivalTime   = getTime(prevTime, data["odpt:arrivalTime"]);
+            let departureTime = getTime(prevTime, data["odpt:departureTime"]);
+            
+            let timetable = new Timetable(station, arrivalTime, departureTime);
+            station.timetables.push(timetable)
+            trainTimetable.timetables.push( timetable );
+
+            prevTime = departureTime;
+
+            cnt++;
+        }
+    }
+
+    msg(`列車時刻表 ${cnt}`);
 }
 
 
@@ -317,7 +435,9 @@ class UI extends UI3D {
 
                 const diff = newPos.sub(this.lastPos);
                 const scaledDiff = diff.div(getScale());
-                ui.viewPos = ui.viewPos.sub(scaledDiff);
+                ui.viewPos.x -= scaledDiff.x;
+                ui.viewPos.y += scaledDiff.y;
+
                 drawStations();
             }
         }
@@ -344,18 +464,6 @@ class UI extends UI3D {
     }
 }
 
-function testCanvasDrawable(){
-    canvasDrawable = new CanvasDrawable(cnvMap);
-
-    var webGlCanvas = document.getElementById("webgl-canvas") as HTMLCanvasElement;
-
-    mygpgpu = CreateGPGPU(webGlCanvas, ui);
-
-    mygpgpu.startDraw3D([ 
-        canvasDrawable,
-    ]);
-}
-
 export function initJikuRyoko(){
     ui = new UI();
 
@@ -369,17 +477,28 @@ export function initJikuRyoko(){
 
     fetchJson("json/Stations.json", getStations);
 
-    fetchJson("json/TrainTimetable.json", (objs:any[])=>{ 
-        msg(`列車時刻表`);
-    });
+    fetchJson("json/TrainTimetable.json", getTrainTimetables);
 
     const timerId = setInterval(function(){
-        if(operators == undefined || railways == undefined || stations == undefined){
+        if(operators == undefined || railways == undefined || stations == undefined || ! timetableReady){
             return;
         }
 
         clearInterval(timerId);
+
+        canvasDrawable = new CanvasDrawable(cnvMap);
+
+        var webGlCanvas = document.getElementById("webgl-canvas") as HTMLCanvasElement;
     
+        mygpgpu = CreateGPGPU(webGlCanvas, ui);
+
+        drawStations(false);
+        timeDrawable = new Points(timePoints, Color.red, 5);
+
+        mygpgpu.startDraw3D([ 
+            canvasDrawable,
+            timeDrawable
+        ]);
     }, 100);
 
     cnvMap = document.getElementById("canvas-map") as HTMLCanvasElement;
