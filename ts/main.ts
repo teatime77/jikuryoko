@@ -1,7 +1,10 @@
 import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Package }  from "./lib/gpgpu.js";
 import { CanvasDrawable } from "./draw.js";
 
-const stations : Station[] = [];
+let operators : Operator[];
+let railways  : Railway[];
+let stations  : Station[];
+
 let cnvMap : HTMLCanvasElement;
 let cnvSize : Vec2;
 let ctx : CanvasRenderingContext2D;
@@ -83,15 +86,64 @@ class Title {
     }
 }
 
+class Operator {
+    title: string;
+    sameAs: string;
+
+    constructor(obj:any){
+        this.title = obj["dc:title"];
+
+        const sameAs = obj["owl:sameAs"] as string;
+        if(sameAs.startsWith("odpt.Operator:")){
+            this.sameAs = sameAs.substring("odpt.Operator:".length);
+        }
+        else{
+            msg(`same as error 2:${sameAs} ${this.title}`);
+        }
+    }
+}
+
+class Railway {
+    title: string;
+    sameAs: string;
+
+    constructor(obj:any){
+        this.title = obj["dc:title"];
+
+        const sameAs = obj["owl:sameAs"] as string;
+        if(sameAs.startsWith("odpt.Railway:")){
+            this.sameAs = sameAs.substring("odpt.Railway:".length);
+        }
+        else{
+            msg(`same as error 2:${sameAs} ${this.title}`);
+        }
+    }
+}
+
 class Station {
     pos: Vec2;
     title: Title;
 
-    constructor(obj:Station){
+    // owl:sameAs: "odpt.Station:Tobu.Daishi.Nishiarai"
+    sameAs: string;
+
+    constructor(obj:any){
         this.pos = new Vec2(obj["geo:lat"], obj["geo:long"]);
 
         const title = obj["odpt:stationTitle"] as Title;
         this.title = new Title(title.en, title.ja);
+        const sameAs = obj["owl:sameAs"] as string;
+        if(sameAs.startsWith("odpt.Station:")){
+            this.sameAs = sameAs.substring("odpt.Station:".length);
+            const v = this.sameAs.split(".");
+            if(v.length != 3){
+
+                msg(`same as error 1:${sameAs} ${obj["odpt:stationTitle"]["ja"]}`);
+            }
+        }
+        else{
+            msg(`same as error 2:${sameAs} ${obj["odpt:stationTitle"]["ja"]}`);
+        }
     }
 
     mateText(){
@@ -144,25 +196,25 @@ export function getData(param: string, fnc:(json: any[])=>void = undefined){
     });
 }
 
+function isNumber(obj:any): boolean {
+    return (typeof obj) == "number";
+}
+
 function isNull(obj:any): boolean {
     return obj == undefined || obj == null;
 }
 
 function getStations(objs:[]){
+    stations = [];
     for(let obj of objs){
 
         if(isNull(obj["geo:lat"]) || isNull(obj["geo:long"])){
-            msg(`位置不明:${obj["odpt:stationTitle"]["ja"]}`);
-            
+            msg(`位置不明:${obj["odpt:stationTitle"]["ja"]}`);            
         }
         else{
 
             stations.push( new Station(obj as Station) );
         }
-    }
-
-    for(let sta of stations){
-        msg(`${sta.title.ja} ${sta.pos.x} ${sta.pos.y} `);
     }
 
     const minX = stations.map(a => a.pos.x).reduce((a, b) => Math.min(a, b));
@@ -304,15 +356,31 @@ function testCanvasDrawable(){
     ]);
 }
 
-
 export function initJikuRyoko(){
     ui = new UI();
 
-    // fetchJson("json/Stations.json", (data:any[])=>{
-    //     msg(`駅 done:${data.length}`)
-    // });
+    fetchJson("json/Operators.json", (objs:any[])=>{ 
+        operators = objs.map(x => new Operator(x));
+    });
+
+    fetchJson("json/Railways.json", (objs:any[])=>{
+        railways = objs.map(x => new Railway(x));
+    });
+
     fetchJson("json/Stations.json", getStations);
 
+    fetchJson("json/TrainTimetable.json", (objs:any[])=>{ 
+        msg(`列車時刻表`);
+    });
+
+    const timerId = setInterval(function(){
+        if(operators == undefined || railways == undefined || stations == undefined){
+            return;
+        }
+
+        clearInterval(timerId);
+    
+    }, 100);
 
     cnvMap = document.getElementById("canvas-map") as HTMLCanvasElement;
     cnvSize = new Vec2(cnvMap.width, cnvMap.height);
