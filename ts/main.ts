@@ -1,4 +1,4 @@
-import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Package, Vertex, Points, Color }  from "./lib/gpgpu.js";
+import { CreateGPGPU, GPGPU, DrawParam, UI3D, TextureInfo, Vertex, Points, Color }  from "./lib/gpgpu.js";
 import { CanvasDrawable, mapBox } from "./draw.js";
 
 let operators : Operator[];
@@ -320,7 +320,6 @@ function drawStations(setDirty: boolean = true){
     if(setDirty){
 
         const param = canvasDrawable.getParam();
-        const pkg = mygpgpu.packages[param.id] as Package;
         const texInf = Array.from(param.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
         console.assert(texInf != undefined);
         texInf.dirty = true
