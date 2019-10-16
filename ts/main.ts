@@ -321,7 +321,7 @@ function drawStations(setDirty: boolean = true){
 
         const param = canvasDrawable.getParam();
         const pkg = mygpgpu.packages[param.id] as Package;
-        const texInf = Array.from(pkg.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
+        const texInf = Array.from(param.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
         console.assert(texInf != undefined);
         texInf.dirty = true
     }
