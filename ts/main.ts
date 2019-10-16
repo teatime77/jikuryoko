@@ -13,7 +13,7 @@ let mygpgpu : GPGPU = undefined;
 let ui : UI;
 let canvasDrawable: CanvasDrawable;
 let timeDrawable : Points;
-let timePoints: Vertex[];
+let timePoints: Float32Array;
 
 function msg(text: string){
     console.log(text);
@@ -127,6 +127,7 @@ class Station {
     pos: Vec2;
     title: Title;
     timetables : Timetable[] = [];
+    inView: boolean;
 
     // owl:sameAs: "odpt.Station:Tobu.Daishi.Nishiarai"
     sameAs: string;
@@ -257,6 +258,10 @@ function getStations(objs:[]){
 }
 
 function drawStations(setDirty: boolean = true){
+    if(mygpgpu.pending){
+        return;
+    }
+    mygpgpu.pending = true;
     const viewBottom = ui.viewPos.y + ui.viewSize.y;
     const scale = cnvSize.div(ui.viewSize);
 
@@ -266,28 +271,43 @@ function drawStations(setDirty: boolean = true){
 
     msg(`pos:(${ui.viewPos.x} ${ui.viewPos.y}) size:(${ui.viewSize.x} ${ui.viewSize.y}) scale:(${scale.x} ${scale.y})`)
 
-    timePoints = [];
     ctx.clearRect(0, 0, cnvMap.width, cnvMap.height);
 
+    let inViewCnt = 0;
     for(let sta of stations.values()){
         let x = (sta.pos.x - ui.viewPos.x) * scale.x;
         let y = (viewBottom - sta.pos.y) * scale.y;
         if(0 <= x && x < cnvSize.x && 0 <= y && y < cnvSize.y){
 
+            inViewCnt += sta.timetables.length;
+            sta.inView = true;
+        }
+        else{
+
+            sta.inView = false;
+        }
+    }
+
+    timePoints = new Float32Array(3 * inViewCnt);
+    let base = 0;
+
+    for(let sta of stations.values()){
+        if(sta.inView){
+            let x = (sta.pos.x - ui.viewPos.x) * scale.x;
+            let y = (viewBottom - sta.pos.y) * scale.y;
+
             ctx.strokeText(sta.title.ja, x, y);
 
-            msg(`${sta.title.ja} ${sta.timetables.length}`)
+            let x2 = mapBox.x1 + (sta.pos.x - ui.viewPos.x) * scaleW;
+            let y2 = mapBox.y1 + (sta.pos.y - ui.viewPos.y) * scaleH;
             for(let timetable of sta.timetables){
-                // if(0.1 < Math.random()){
-                //     continue;
-                // }
 
-                let x2 = mapBox.x1 + (sta.pos.x - ui.viewPos.x) * scaleW;
-                let y2 = mapBox.y1 + (sta.pos.y - ui.viewPos.y) * scaleH;
                 let z2 = mapBox.z1 +  timetable.time * scaleD;
-                timePoints.push(new Vertex(x2, y2, z2));
+                timePoints[base    ] = x2;
+                timePoints[base + 1] = y2;
+                timePoints[base + 2] = z2;
 
-                // msg(`${sta.pos.x},${sta.pos.y} => ${x2} ${y2}`)
+                base += 3;
             }
         }
     }
@@ -351,7 +371,7 @@ function getTrainTimetables(objs:any[]){
 
     for(let obj of objs){
         if(obj["odpt:calendar"] != "odpt.Calendar:Weekday"){
-            continue;
+            // continue;
         }
         let trainTimetable = new TrainTimetable();
         let prevTime: number = 0;
@@ -461,9 +481,14 @@ class UI extends UI3D {
         }
         else{
             const center = ui.viewPos.add(ui.viewSize.mul(0.5));
-            ui.viewSize = ui.viewSize.mul(1 + 0.002 * ev.deltaY);
-            ui.viewPos = center.sub(ui.viewSize.mul(0.5));
-            drawStations();
+
+            const ratio = 1 + 0.001 * ev.deltaY;
+            if(0 < ratio){
+
+                ui.viewSize = ui.viewSize.mul(ratio);
+                ui.viewPos = center.sub(ui.viewSize.mul(0.5));
+                drawStations();
+            }
         }
     }
 }
