@@ -319,8 +319,8 @@ function drawStations(setDirty: boolean = true){
 
     if(setDirty){
 
-        const param = canvasDrawable.getParam();
-        const texInf = Array.from(param.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
+        const pkg = canvasDrawable.getParam();
+        const texInf = Array.from(pkg.textures).find(x => x instanceof TextureInfo && x.value == cnvMap) as TextureInfo;
         console.assert(texInf != undefined);
         texInf.dirty = true
     }

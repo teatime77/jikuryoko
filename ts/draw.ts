@@ -11,11 +11,11 @@ export class CanvasDrawable extends Drawable {
     }
 
     getParam() {
-        if (!this.param) {
+        if (!this.package) {
 
             var [mesh, idx_array] = makePlaneBuffers(mapBox, 11, 11, new TextureInfo(null, null, this.canvas));
 
-            this.param = {
+            this.package = {
                 id: "Earth",
                 vertexShader: GPGPU.textureSphereVertexShader,
                 fragmentShader: GPGPU.defaultFragmentShader,
@@ -24,6 +24,6 @@ export class CanvasDrawable extends Drawable {
             } as any as Package;
         }
 
-        return this.param;
+        return this.package;
     }
 }
